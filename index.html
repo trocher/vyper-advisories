@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vyper security advisories by version</title>
+  <meta name="description" content="Timeline of GitHub security advisories (GHSA) affecting each version of the Vyper compiler.">
+  <link rel="icon" href="assets/vyper-symbol.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script>
+    // apply the saved / preferred theme before first paint
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem("vyper-ghsa:theme"); } catch (e) {}
+      if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      document.documentElement.dataset.theme = t;
+    })();
+  </script>
+</head>
+<body>
+  <header class="top">
+    <img class="logo" src="assets/vyper-symbol.svg" alt="Vyper logo">
+    <div>
+      <h1>Vyper security advisories</h1>
+      <p class="sub">
+        Which <a href="https://github.com/vyperlang/vyper/security/advisories" target="_blank" rel="noopener">GHSA</a>
+        affects which version of the Vyper compiler. Data is fetched live from the GitHub API.
+      </p>
+    </div>
+    <div id="stats" class="stats" aria-live="polite"></div>
+    <button type="button" id="theme-toggle" class="btn" aria-label="Toggle light/dark theme"></button>
+  </header>
+
+  <section class="controls" aria-label="Filters">
+    <div class="group" id="sev-filters" role="group" aria-label="Severity"></div>
+    <label class="group check">
+      <input type="checkbox" id="show-pre"> show all pre-releases
+    </label>
+    <label class="group">
+      sort
+      <select id="sort">
+        <option value="fix">by fix version</option>
+        <option value="severity">by severity</option>
+        <option value="published">by publish date</option>
+      </select>
+    </label>
+    <label class="group grow">
+      <input type="search" id="search" placeholder="filter: GHSA id, CVE, keyword…">
+    </label>
+    <label class="group">
+      check version
+      <input type="text" id="version-input" list="version-list" placeholder="e.g. 0.3.9" size="10">
+      <datalist id="version-list"></datalist>
+    </label>
+    <div class="group" role="group" aria-label="Export the listed advisories as Markdown">
+      <button type="button" class="btn" id="md-copy" title="Copy the advisories currently listed (filters applied) as a Markdown table">copy MD</button>
+      <button type="button" class="btn" id="md-download" title="Download the advisories currently listed (filters applied) as a .md file">download .md</button>
+    </div>
+  </section>
+
+  <main>
+    <div id="status" class="status">Loading advisories from GitHub…</div>
+    <div id="chart-wrap" class="chart-wrap" hidden>
+      <div id="chart" class="chart"></div>
+    </div>
+    <p class="hint" id="hint" hidden>
+      Click a version to list the advisories affecting it. Click a bar to open the advisory on GitHub.
+      Bars run from the first to the last affected version; the label after a bar is the first patched version.
+    </p>
+    <section id="detail" class="detail" hidden></section>
+  </main>
+
+  <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+
+  <footer>
+    Source: <a href="https://github.com/vyperlang/vyper/security/advisories" target="_blank" rel="noopener">github.com/vyperlang/vyper/security/advisories</a>
+    · Versions from repository tags · Colors from <a href="https://github.com/vyperlang/vyper-brand" target="_blank" rel="noopener">vyper-brand</a>
+    · <span id="fetched"></span>
+    · <a href="#" id="refresh">refresh now</a>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
