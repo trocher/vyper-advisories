@@ -316,8 +316,9 @@ main { padding: 16px 28px; }
   font-size: 12px;
   color: var(--muted);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding-left: 4px;
-  pointer-events: none;
 }
 .fix.unpatched { color: var(--warn); font-weight: 600; }
 

@@ -163,10 +163,14 @@ function normalizeAdvisory(a) {
     (v) => v.package && v.package.name && v.package.name.toLowerCase() === PACKAGE,
   );
   const ranges = [];
+  const rangeTexts = []; // raw text of each entry in `ranges`
   const patched = [];
   let parseError = null;
   for (const v of vulns) {
-    try { ranges.push(parseRange(v.vulnerable_version_range)); } catch (e) { parseError = e.message; }
+    try {
+      ranges.push(parseRange(v.vulnerable_version_range));
+      rangeTexts.push(v.vulnerable_version_range.trim());
+    } catch (e) { parseError = e.message; }
     if (v.patched_versions) patched.push(...v.patched_versions.split(",").map((s) => s.trim()).filter(Boolean));
   }
   const sev = SEVERITIES.includes(a.severity) ? a.severity : "unknown";
@@ -184,6 +188,7 @@ function normalizeAdvisory(a) {
     published: a.published_at,
     rangeText: vulns.map((v) => v.vulnerable_version_range).join(" | ") || "(none listed)",
     ranges,
+    rangeTexts,
     patched,
     parseError,
     cwes: (a.cwes || []).map((c) => c.cwe_id),
@@ -192,6 +197,20 @@ function normalizeAdvisory(a) {
 
 function affects(adv, v) {
   return adv.ranges.some((r) => satisfies(v, r));
+}
+
+// index of the newest version in `versions` (ascending) affected by adv, -1 if none
+function lastAffected(adv, versions) {
+  for (let i = versions.length - 1; i >= 0; i--) if (affects(adv, versions[i])) return i;
+  return -1;
+}
+
+// first listed patched version newer than v, or null
+function patchedAfter(adv, v) {
+  return adv.patched
+    .map((p) => parseVersion(p))
+    .filter((p) => p && cmpVersion(p, v) > 0)
+    .sort(cmpVersion)[0] || null;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -239,8 +258,9 @@ function runs(adv, cols) {
 
 function sortRows(rows) {
   const by = {
-    fix: (a, b) => (a.end - b.end) || (a.start - b.start) || (SEV_RANK[b.adv.severity] - SEV_RANK[a.adv.severity]),
-    severity: (a, b) => (SEV_RANK[b.adv.severity] - SEV_RANK[a.adv.severity]) || (a.end - b.end) || (a.start - b.start),
+    // most recently fixed (or still unpatched) first
+    fix: (a, b) => (b.end - a.end) || (b.lastStart - a.lastStart) || (SEV_RANK[b.adv.severity] - SEV_RANK[a.adv.severity]),
+    severity: (a, b) => (SEV_RANK[b.adv.severity] - SEV_RANK[a.adv.severity]) || (b.end - a.end) || (b.lastStart - a.lastStart),
     published: (a, b) => (b.adv.published || "").localeCompare(a.adv.published || ""),
   }[state.sort];
   return rows.sort(by);
@@ -282,6 +302,9 @@ function renderChart() {
 
   const advs = visibleAdvisories();
   const colAt = (i) => i + 2; // grid column (1 = label)
+  const colW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--col-w")) || 24;
+  // rough check that text (12px Inconsolata, ~6.2px/char) fits in `span` columns minus `pad` px
+  const fits = (t, span, pad) => t.length * 6.2 + pad <= span * colW;
 
   // ---- header: series bands, version labels, per-version counts ----
   const head = el("div", { class: "head grid" });
@@ -343,7 +366,8 @@ function renderChart() {
 
   let rows = advs.map((adv) => {
     const r = runs(adv, cols);
-    return { adv, runs: r, start: r.length ? r[0][0] : n, end: r.length ? r[r.length - 1][1] : n };
+    const last = r.length ? r[r.length - 1] : [n, n];
+    return { adv, runs: r, lastStart: last[0], end: last[1] };
   });
   rows = sortRows(rows);
 
@@ -354,28 +378,42 @@ function renderChart() {
       class: "label", href: adv.url, target: "_blank", rel: "noopener", "data-id": adv.id,
     }, badge(adv.severity), el("span", { class: "id" }, adv.id), el("span", { class: "summary" }, adv.summary)));
 
-    for (const [s, e] of rr) {
+    rr.forEach(([s, e], k) => {
       const span = e - s + 1;
-      const open = e === n - 1 && !adv.patched.length; // still affects the latest version
+      // an advisory can list several affected windows: label each bar with its own range(s)
+      const own = adv.rangeTexts.filter((t, j) => satisfies(cols[s], adv.ranges[j]) || satisfies(cols[e], adv.ranges[j]));
+      const rangeText = own.join(" | ") || adv.rangeText;
+      const fixedIn = patchedAfter(adv, cols[e]);
+      const open = e === n - 1 && !fixedIn; // still affects the latest version
+      // open bars: prefer "range · unpatched", then just the range (the arrow tip already says open)
       const text = open
-        ? (span >= 9 ? `${adv.rangeText} · unpatched` : span >= 4 ? "unpatched" : "")
-        : (span >= 4 ? adv.rangeText : "");
+        ? ([`${rangeText} · unpatched`, rangeText, "unpatched"].find((t) => fits(t, span, 20)) || "")
+        : e === n - 1 ? (span >= 4 ? `→ ${fixedIn.key} (unreleased)` : "")
+        : (span >= 4 ? rangeText : "");
       row.append(el("a", {
         class: `bar sev-${adv.severity}${open ? " open" : ""}`,
         href: adv.url, target: "_blank", rel: "noopener", "data-id": adv.id,
         style: `grid-column:${colAt(s)} / span ${span}`,
         "aria-label": `${adv.id} (${adv.severity}) affects ${cols[s].label} – ${cols[e].label}${open ? ", unpatched" : ""}`,
       }, text));
-    }
-    if (rr.length) {
-      const last = rr[rr.length - 1][1];
-      if (last + 1 < n) {
-        row.append(el("span", {
-          class: `fix${adv.patched.length ? "" : " unpatched"}`,
-          style: `grid-column:${colAt(last + 1)} / span ${Math.min(8, n - last - 1)}`,
-        }, adv.patched.length ? "→ " + adv.patched.join(", ") : "unpatched"));
-      }
-    } else {
+      if (e + 1 >= n) return;
+      // fix label in the gap up to the next window (or up to 8 columns after the last one)
+      const gap = k + 1 < rr.length ? rr[k + 1][0] - e - 1 : Math.min(8, n - e - 1);
+      const isLast = k === rr.length - 1;
+      // in narrow gaps, drop the base shared with the bar's end: "→ 0.1.0b12" -> "→ b12"
+
+      const short = fixedIn && fixedIn.pre && fixedIn.base === cols[e].base ? "→ " + fixedIn.pre.join("") : null;
+      const label = fixedIn ? (short && !fits("→ " + fixedIn.key, gap, 4) ? short : "→ " + fixedIn.key)
+        : isLast ? (adv.patched.length ? "→ " + adv.patched.join(", ") : "unpatched")
+        : null;
+      if (!label) return;
+      row.append(el("span", {
+        class: `fix${!fixedIn && !adv.patched.length ? " unpatched" : ""}`,
+        style: `grid-column:${colAt(e + 1)} / span ${gap}`,
+        title: fixedIn ? "fixed in " + fixedIn.key : label,
+      }, label));
+    });
+    if (!rr.length) {
       row.append(el("span", { class: "fix", style: `grid-column:${colAt(0)} / span ${Math.min(20, n)}` },
         adv.parseError ? `could not parse range: ${adv.rangeText}` : `no displayed version in range ${adv.rangeText}`));
     }
@@ -434,12 +472,9 @@ function severityCounts(list) {
 function sortForExport(list) {
   if (state.sort === "severity") return bySeverity(list);
   if (state.sort === "published") return list.slice().sort((a, b) => (b.published || "").localeCompare(a.published || ""));
-  const fixed = (a) => (a.patched.length ? parseVersion(a.patched[0]) : null);
-  return list.slice().sort((a, b) => {
-    const fa = fixed(a), fb = fixed(b);
-    if (!fa || !fb) return (fa ? -1 : 0) - (fb ? -1 : 0) || SEV_RANK[b.severity] - SEV_RANK[a.severity];
-    return cmpVersion(fa, fb) || SEV_RANK[b.severity] - SEV_RANK[a.severity];
-  });
+  // most recently fixed (or still unpatched) first, like the chart
+  const last = new Map(list.map((a) => [a, lastAffected(a, state.versions)]));
+  return list.slice().sort((a, b) => (last.get(b) - last.get(a)) || SEV_RANK[b.severity] - SEV_RANK[a.severity]);
 }
 
 const mdCell = (s) => String(s || "").replace(/\r?\n/g, " ").replace(/\|/g, "\\|").trim();
@@ -586,6 +621,8 @@ function findVersion(text) {
 }
 
 function tooltipFor(adv) {
+  const latest = state.versions[state.versions.length - 1];
+  const stillOpen = adv.patched.length && latest && affects(adv, latest) && !patchedAfter(adv, latest);
   return el("div", {},
     el("h3", {}, badge(adv.severity), " ", adv.id),
     el("p", { style: "margin:0 0 8px" }, adv.summary),
@@ -593,7 +630,7 @@ function tooltipFor(adv) {
       el("dt", {}, "severity"), el("dd", {}, adv.severity + (adv.score ? ` · CVSS ${adv.score}` : "")),
       adv.cve ? [el("dt", {}, "CVE"), el("dd", {}, adv.cve)] : null,
       el("dt", {}, "affected"), el("dd", {}, adv.rangeText),
-      el("dt", {}, "patched"), el("dd", {}, adv.patched.join(", ") || "not yet patched"),
+      el("dt", {}, "patched"), el("dd", {}, (adv.patched.join(", ") || "not yet patched") + (stillOpen ? ` (latest ${latest.label} still affected)` : "")),
       el("dt", {}, "published"), el("dd", {}, (adv.published || "").slice(0, 10)),
       adv.cwes.length ? [el("dt", {}, "CWE"), el("dd", {}, adv.cwes.join(", "))] : null));
 }
