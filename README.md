@@ -23,21 +23,9 @@ The page fetches everything at runtime from the public GitHub REST API. It needs
 | advisories | `GET /repos/vyperlang/vyper/security-advisories?state=published` |
 | versions | `GET /repos/vyperlang/vyper/tags` (plus `/releases` for release dates) |
 
-Version ranges such as `>= 0.3.4, < 0.3.10` follow PEP 440 rules, the same rules pip and GitHub use.
-For example, `< 0.4.0` does not include `0.4.0rc1`.
-
 Unauthenticated API calls are limited to 60 requests per hour per IP. Each page load uses 3 requests, and the
 responses are cached in `localStorage` for 15 minutes. If GitHub rejects a request, the page falls back to the
 cached data.
-
-## Colors
-
-Colors come from [vyperlang/vyper-brand](https://github.com/vyperlang/vyper-brand): Vyper Black `#180C25`
-background, Sand `#DBCBAB` text, Violet `#9F4CF2` accents, and the Inconsolata typeface.
-Severities use brand colors: low = Blue `#75FBFB`, medium = Yellow `#E7FF54`, high = Orange `#FFA800`,
-critical = Violet 80% `#B270F5`. The light theme uses Sand 5% / Sand 20% surfaces and darker brand steps for
-contrast: Blue 150% `#3B7E7E`, Yellow 120% `#B9CC43`, Orange 120% `#CC8600`, Violet `#9F4CF2`. Each bar also shows a letter badge (C/H/M/L), so you don't have to tell
-severities apart by color alone.
 
 ## Hosting on GitHub Pages
 
